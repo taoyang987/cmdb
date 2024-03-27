@@ -12,12 +12,17 @@ from ldap3 import Server
 from ldap3.core.exceptions import LDAPBindError
 from ldap3.core.exceptions import LDAPCertificateError
 from ldap3.core.exceptions import LDAPSocketOpenError
-
+from ldap3 import ALL_ATTRIBUTES
 from api.lib.common_setting.common_data import AuthenticateDataCRUD
 from api.lib.common_setting.const import AuthenticateType
 from api.lib.perm.acl.audit import AuditCRUD
 from api.lib.perm.acl.resp_format import ErrFormat
 from api.models.acl import User
+
+SERVER_USER = 'cn=admin,dc=hzguode,dc=com'
+SERVER_PASSWORD = "XXXXX"
+active_base_dn = 'dc=hzguode,dc=com'  # 正式员工账户所在OU
+search_filter = '(objectclass=inetOrgPerson)'  # 只获取【用户】对象
 
 
 def authenticate_with_ldap(username, password):
@@ -30,13 +35,22 @@ def authenticate_with_ldap(username, password):
     else:
         who = config.get('ldap_user_dn').format(username)
         email = "{}@{}".format(who, config.get('ldap_domain'))
-
+    print(email)
     username = username.split('@')[0]
     user = User.query.get_by_username(username)
     try:
         if not password:
             raise LDAPCertificateError
-
+        try:
+            conn0 = Connection(server, user=SERVER_USER, password=SERVER_PASSWORD, auto_bind=AUTO_BIND_NO_TLS)
+        except LDAPBindError:
+            print("ldap的管理员账号密码连接出错")
+        # my_dn,mymail = dn_get(conn0, user)
+        my_dn = dn_get(conn0, user)
+        mymail = mail_get(conn0, user)
+        who = my_dn
+        email=mymail
+        print("email"+email)
         try:
             conn = Connection(server, user=who, password=password, auto_bind=AUTO_BIND_NO_TLS)
         except LDAPBindError:
@@ -65,3 +79,34 @@ def authenticate_with_ldap(username, password):
     except LDAPSocketOpenError as e:
         current_app.logger.info(e)
         return abort(403, ErrFormat.ldap_connection_failed)
+
+
+def users_get(conn):
+    '''获取所有的用户'''
+    return conn.search(search_base=active_base_dn, search_filter=search_filter,
+                       attributes=ALL_ATTRIBUTES)
+
+
+def dn_get(conn, username):
+    mydn = ''
+    mail=''
+    users_get(conn)
+    if conn.entries:
+        for entry in conn.entries:
+            if username == entry.cn:
+                mydn = entry.entry_dn
+                mail=entry.mail.value
+                break
+        return mydn
+
+def mail_get(conn, username):
+    mydn = ''
+    mail=''
+    users_get(conn)
+    if conn.entries:
+        for entry in conn.entries:
+            if username == entry.cn:
+                # mydn = entry.entry_dn
+                mail=entry.mail.value
+                break
+        return mail
